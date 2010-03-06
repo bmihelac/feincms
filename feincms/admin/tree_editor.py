@@ -122,7 +122,7 @@ class ChangeList(main.ChangeList):
         return super(ChangeList, self).get_query_set().order_by('tree_id', 'lft')
 
     def get_results(self, request):
-        if settings.FEINCMS_TREE_EDITOR_INCLUDE_ANCESTORS:
+        if settings.FEINCMS_TREE_EDITOR_INCLUDE_ANCESTORS and self.query_set:
             clauses = [Q(
                 tree_id=tree_id,
                 lft__lte=lft,
