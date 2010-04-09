@@ -6,7 +6,7 @@ from setuptools.dist import Distribution
 
 Distribution({
     "setup_requires": [
-        'Django >=1.1.1'
+        #'Django >=1.1.1'
     ]
 })
 
@@ -34,12 +34,12 @@ setup(name='FeinCMS',
         'Topic :: Software Development :: Libraries :: Application Frameworks',
     ],
     install_requires=[
-        'Django >=1.1.1',
+        #'Django >=1.1.1',
     ],
     requires=[
         #'lxml', # only needed for rich text cleansing
         'tagging (>0.2.1)', # please use SVN trunk
-        'django_mptt (>0.2.1)', # please use SVN trunk
+        'django_mptt (>0.2.1)', # please use the version from http://github.com/matthiask/django-mptt/
     ],
     packages=['feincms',
         'feincms.admin',
