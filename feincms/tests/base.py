@@ -1012,10 +1012,16 @@ class PagesTestCase(TestCase):
             region='main', ordering=0,
             urlconf_path='feincms.tests.applicationcontent_urls')
 
-        # test reverse replacement
         from django.core.urlresolvers import reverse
+
+        # test reverse replacement
         self.assertEqual(reverse('feincms.tests.applicationcontent_urls/ac_module_root'),
                          page.get_absolute_url())
+        
+        # applicationcontent has been added twice, should find right one by tree_id
+        page_de = self.create_page(title='Home DE', language='de', active=True)
+        page_de_1 = self.create_page(title='Child 1 DE', language='de', parent=page_de.id, active=True)
+        
 
 
 Entry.register_extensions('seo', 'translations', 'seo')
