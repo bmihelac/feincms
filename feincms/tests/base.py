@@ -1018,9 +1018,22 @@ class PagesTestCase(TestCase):
         self.assertEqual(reverse('feincms.tests.applicationcontent_urls/ac_module_root'),
                          page.get_absolute_url())
         
-        # applicationcontent has been added twice, should find right one by tree_id
-        page_de = self.create_page(title='Home DE', language='de', active=True)
-        page_de_1 = self.create_page(title='Child 1 DE', language='de', parent=page_de.id, active=True)
+        # when specific applicationcontent exists more then once reverse should return url 
+        # for the one that has tree_id same as current feincms page
+        self.create_page(title='Home DE', language='de', active=True)
+        page_de = Page.objects.get(title='Home DE')
+        self.create_page(title='Child 1 DE', language='de', parent=page_de.id, active=True)
+        page_de_1 = Page.objects.get(title='Child 1 DE')
+        page_de_1.applicationcontent_set.create(
+            region='main', ordering=0,
+            urlconf_path='feincms.tests.applicationcontent_urls')
+        
+        settings.TEMPLATE_DIRS = (os.path.join(os.path.dirname(__file__), 'templates'),)
+        self.client.get(page_de.get_absolute_url())
+            
+        self.assertEqual(reverse('feincms.tests.applicationcontent_urls/ac_module_root'),
+                         page_de_1.get_absolute_url())
+        
         
 
 

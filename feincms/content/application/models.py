@@ -53,34 +53,27 @@ def reverse(viewname, urlconf=None, args=None, kwargs=None, prefix=None, *vargs,
             # We are reversing an URL from our own ApplicationContent
             return _reverse(other_viewname, other_urlconf, args, kwargs, _local.urlconf[1], *vargs, **vkwargs)
 
-        if not hasattr(_local, 'reverse_cache'):
-            _local.reverse_cache = {}
+        # TODO do not use internal feincms data structures as much
+        model_class = ApplicationContent._feincms_content_models[0]
+        contents = model_class.objects.filter(
+            urlconf_path=other_urlconf).select_related('parent')
 
-        if other_urlconf not in _local.reverse_cache:
-            # TODO do not use internal feincms data structures as much
-            model_class = ApplicationContent._feincms_content_models[0]
-            contents = model_class.objects.filter(
-                urlconf_path=other_urlconf).select_related('parent')
+        proximity_info = getattr(_local, 'proximity_info', None)
 
-            proximity_info = getattr(_local, 'proximity_info', None)
-
-            if proximity_info:
-                # Poor man's proximity analysis. Filter by tree_id :-)
-                try:
-                    content = contents.get(parent__tree_id=proximity_info[0])
-                except (model_class.DoesNotExist, model_class.MultipleObjectsReturned):
-                    try:
-                        content = contents[0]
-                    except IndexError:
-                        content = None
-            else:
+        if proximity_info:
+            # Poor man's proximity analysis. Filter by tree_id :-)
+            try:
+                content = contents.get(parent__tree_id=proximity_info[0])
+            except (model_class.DoesNotExist, model_class.MultipleObjectsReturned):
                 try:
                     content = contents[0]
                 except IndexError:
                     content = None
-            _local.reverse_cache[other_urlconf] = content
         else:
-            content = _local.reverse_cache[other_urlconf]
+            try:
+                content = contents[0]
+            except IndexError:
+                content = None
 
         if content:
             # Save information from _urlconfs in case we are inside another
