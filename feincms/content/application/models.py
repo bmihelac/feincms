@@ -25,6 +25,32 @@ _local = local()
 
 def retrieve_page_information(page):
     _local.proximity_info = (page.tree_id, page.lft, page.rght, page.level)
+    
+def _empty_reverse_cache():
+    _local.reverse_cache = {}
+    
+def get_application_contents(other_urlconf):
+    if not hasattr(_local, 'reverse_cache'):
+        _empty_reverse_cache()
+    if other_urlconf not in _local.reverse_cache:
+        # TODO do not use internal feincms data structures as much
+        model_class = ApplicationContent._feincms_content_models[0]
+        _local.reverse_cache[other_urlconf] = model_class.objects.filter(
+                                           urlconf_path=other_urlconf).select_related('parent')
+    return _local.reverse_cache[other_urlconf]
+    
+def find_best_application_content_match(contents, proximity_info=None):
+    # Poor man's proximity analysis. Filter by tree_id :-)
+    if proximity_info:
+        try:
+            content = contents.get(parent__tree_id=proximity_info[0])
+            return content
+        except (model_class.DoesNotExist, model_class.MultipleObjectsReturned):
+            pass
+    if contents:
+        return contents[0]
+    return None
+        
 
 OTHER_APPLICATIONCONTENT_SEPARATOR = '/'
 
@@ -53,28 +79,10 @@ def reverse(viewname, urlconf=None, args=None, kwargs=None, prefix=None, *vargs,
             # We are reversing an URL from our own ApplicationContent
             return _reverse(other_viewname, other_urlconf, args, kwargs, _local.urlconf[1], *vargs, **vkwargs)
 
-        # TODO do not use internal feincms data structures as much
-        model_class = ApplicationContent._feincms_content_models[0]
-        contents = model_class.objects.filter(
-            urlconf_path=other_urlconf).select_related('parent')
-
+        contents = get_application_contents(other_urlconf)
         proximity_info = getattr(_local, 'proximity_info', None)
-
-        if proximity_info:
-            # Poor man's proximity analysis. Filter by tree_id :-)
-            try:
-                content = contents.get(parent__tree_id=proximity_info[0])
-            except (model_class.DoesNotExist, model_class.MultipleObjectsReturned):
-                try:
-                    content = contents[0]
-                except IndexError:
-                    content = None
-        else:
-            try:
-                content = contents[0]
-            except IndexError:
-                content = None
-
+        content = find_best_application_content_match(contents, proximity_info)
+        
         if content:
             # Save information from _urlconfs in case we are inside another
             # application contents' ``process`` method currently

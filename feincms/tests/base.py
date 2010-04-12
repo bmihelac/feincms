@@ -14,7 +14,7 @@ from django.template import TemplateDoesNotExist
 from django.template.defaultfilters import slugify
 from django.test import TestCase
 
-from feincms.content.application.models import ApplicationContent
+from feincms.content.application.models import ApplicationContent, _empty_reverse_cache
 from feincms.content.contactform.models import ContactFormContent, ContactForm
 from feincms.content.file.models import FileContent
 from feincms.content.image.models import ImageContent
@@ -1017,7 +1017,8 @@ class PagesTestCase(TestCase):
         # test reverse replacement
         self.assertEqual(reverse('feincms.tests.applicationcontent_urls/ac_module_root'),
                          page.get_absolute_url())
-        
+
+                         
         # when specific applicationcontent exists more then once reverse should return url 
         # for the one that has tree_id same as current feincms page
         self.create_page(title='Home DE', language='de', active=True)
@@ -1027,13 +1028,16 @@ class PagesTestCase(TestCase):
         page_de_1.applicationcontent_set.create(
             region='main', ordering=0,
             urlconf_path='feincms.tests.applicationcontent_urls')
+        _empty_reverse_cache()
         
         settings.TEMPLATE_DIRS = (os.path.join(os.path.dirname(__file__), 'templates'),)
         self.client.get(page_de.get_absolute_url())
-            
         self.assertEqual(reverse('feincms.tests.applicationcontent_urls/ac_module_root'),
                          page_de_1.get_absolute_url())
-        
+
+        self.client.get(page1.get_absolute_url())
+        self.assertEqual(reverse('feincms.tests.applicationcontent_urls/ac_module_root'),
+                      page.get_absolute_url())
         
 
 
