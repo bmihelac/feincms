@@ -28,7 +28,18 @@
 <script type="text/javascript">
     $(document).ready(function(){
         {% block extra-init-js %}{# /* do not use this block, use feincms_item_editor_includes instead */ #}{% endblock %}
-    });
+
+  /* handle Cmd-S and Cmd-Shift-S as save-and-continue and save respectively */
+  $(document.documentElement).keydown(function(event) {
+      if(event.which == 83 && event.metaKey) {
+          sel = event.shiftKey ? 'form:first .save-button' :
+                                 'form:first .save-continue-button';
+          $(sel).click();
+          return false;
+          }
+      });
+
+  });
 </script>
 {% endblock %}
 
@@ -37,7 +48,7 @@
      <a href="../../../">{% trans "Home" %}</a> &rsaquo;
      <a href="../../">{{ opts.app_label|capfirst|escape }}</a> &rsaquo;
      <a href="../">{{ opts.verbose_name_plural|capfirst }}</a> &rsaquo;
-     {{ object.title|truncatewords:"18" }}
+     {% if add %}{{ title }}{% else %}{{ object }}{% endif %}
 </div>
 {% endblock %}
 
@@ -46,13 +57,15 @@
 <div id="content-main">
 
 {% block object-tools %}
-{{ block.super }}
 <ul class="object-tools">
+    {% if object.get_absolute_url %}
+    <li><a target="_blank" href="{{ object.get_absolute_url }}" class="viewsitelink">{% trans "View on site" %}</a></li>
+    {% endif %}
     {% if object.get_preview_url %}
         <li><a target="_blank" href="{{ object.get_preview_url }}" class="viewsitelink">{% trans "Preview" %}</a></li>
     {% endif %}
-    {% if has_add_permission %}
-        <li><a href="../add/?parent={{ object.pk }}" class="addchild">{% trans "Add Child Page" %}</a></li>
+    {% if has_add_permission and has_parent_attribute %}
+        <li><a href="../add/?parent={{ object.pk }}" class="addchild">{% trans "Add child page" %}</a></li>
     {% endif %}
 </ul>
 {% endblock %}
@@ -63,11 +76,13 @@
 <div>
 
 <div class="submit-row" >
-<input type="submit" value="{% trans "Save" %}" class="default" name="_save" />
+<input type="submit" value="{% trans "Save" %}" class="default save-button" name="_save" />
+{% if not add %}
 <p class="deletelink-box"><a href="delete/" class="deletelink">{% trans "Delete" %}</a></p>
+{% endif  %}
 
-<input type="submit" value="{% trans "Save and add another" %}" name="_addanother"  />
-<input type="submit" value="{% trans "Save and continue editing" %}" name="_continue" />
+<input type="submit" value="{% trans "Save and add another" %}" class="save-add-button" name="_addanother"  />
+<input type="submit" value="{% trans "Save and continue editing" %}" class="save-continue-button" name="_continue" />
 </div>
 
 {% if errors %}
@@ -153,9 +168,20 @@
     </div>
 </div>
 
+{% block after_field_sets %}{% endblock %}
+
+{% for inline_admin_formset in inline_admin_formsets %}
+    {% include inline_admin_formset.opts.template %}
+{% endfor %}
+
+{% block after_related_objects %}{% endblock %}
+
+
 <div class="submit-row" >
 <input type="submit" value="{% trans "Save" %}" class="default" name="_save" />
+{% if not add %}
 <p class="deletelink-box"><a href="delete/" class="deletelink">{% trans "Delete" %}</a></p>
+{% endif %}
 
 <input type="submit" value="{% trans "Save and add another" %}" name="_addanother"  />
 <input type="submit" value="{% trans "Save and continue editing" %}" name="_continue" />
@@ -186,6 +212,7 @@
 {% endfor %}
 </div>
 
+{% prepopulated_fields_js %}
 </div>
 </form>
 

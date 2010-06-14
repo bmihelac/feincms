@@ -2,7 +2,10 @@
 # coding=utf-8
 # ------------------------------------------------------------------------
 
+import sys
+
 from django import forms
+from django.core.cache import cache as django_cache
 from django.conf import settings as django_settings
 from django.contrib import admin
 from django.core.urlresolvers import reverse
@@ -26,21 +29,22 @@ import feincms.admin.filterspecs
 
 
 # ------------------------------------------------------------------------
-class PageManager(models.Manager):
+class ActiveAwareContentManagerMixin(object):
+    """
+    Implement what's necessary to add some kind of "active" state for content
+    objects. The notion of active is defined by a number of filter rules that
+    must all match (AND) for the object to be active.
 
-    # A list of filters which are used to determine whether a page is active or not.
-    # Extended for example in the datepublisher extension (date-based publishing and
-    # un-publishing of pages)
-    active_filters = [
-        Q(active=True),
-        ]
-
-    # The fields which should be excluded when creating a copy. The mptt fields are
-    # excluded automatically by other mechanisms
-    exclude_from_copy = ['id', 'tree_id', 'lft', 'rght', 'level']
+    A Manager for a content class using the "datepublisher" extension
+    should either adopt this mixin or implement a similar interface.
+    """
+    active_filters = ()
 
     @classmethod
     def apply_active_filters(cls, queryset):
+        """
+        Return a queryset reflecting the filters defined.
+        """
         for filt in cls.active_filters:
             if callable(filt):
                 queryset = filt(queryset)
@@ -49,8 +53,38 @@ class PageManager(models.Manager):
 
         return queryset
 
+    @classmethod
+    def add_to_active_filters(cls, filter):
+        """
+        Add a new clause to the active filters. A filter may be either
+        a Q object to be applied to the content class or a callable taking
+        a queryset and spitting out a new one.
+        """
+        if not cls.active_filters:
+            cls.active_filters = list()
+        cls.active_filters.append(filter)
+
     def active(self):
+        """
+        Return only currently active objects.
+        """
         return self.apply_active_filters(self)
+
+# ------------------------------------------------------------------------
+def path_to_cache_key(path):
+    from django.utils.encoding import iri_to_uri
+    path = iri_to_uri(path)
+    return 'PAGE-FOR-URL-%d-%s' % ( django_settings.SITE_ID, path )
+
+class PageManager(models.Manager, ActiveAwareContentManagerMixin):
+
+    # A list of filters which are used to determine whether a page is active or not.
+    # Extended for example in the datepublisher extension (date-based publishing and
+    # un-publishing of pages)
+
+    # The fields which should be excluded when creating a copy. The mptt fields are
+    # excluded automatically by other mechanisms
+    exclude_from_copy = ['id', 'tree_id', 'lft', 'rght', 'level']
 
     def page_for_path(self, path, raise404=False):
         """
@@ -92,17 +126,11 @@ class PageManager(models.Manager):
         path = path.strip('/')
 
         # Cache path -> page resolving.
-        # Note: The only possibility that this returns a stale association
-        # is if a page at an url is removed and/or replaced by another page
-        # at that url. This might happen either by manual intervention (admin
-        # moving the page) or automatically via the datepublisher extension
-        # (a page expiring and another becoming active).
-        # Both cases can handle a short time of "being wrong", so this should
-        # be OK.
+        # We flush the cache entry on page saving, so the cache should always
+        # be up to date.
 
-        from django.core.cache import cache as django_cache
         if settings.FEINCMS_USE_CACHE:
-            ck = 'PAGE-FOR-URL-' + path
+            ck = path_to_cache_key(path)
             page = django_cache.get(ck)
             if page:
                 return page
@@ -179,6 +207,7 @@ class PageManager(models.Manager):
 
         return Page.objects.get(pk=with_page.pk)
 
+PageManager.add_to_active_filters( Q(active=True) )
 
 # MARK: -
 # ------------------------------------------------------------------------
@@ -190,19 +219,20 @@ class Page(Base):
     title = models.CharField(_('title'), max_length=200,
         help_text=_('This is used for the generated navigation too.'))
     slug = models.SlugField(_('slug'), max_length=150)
-    parent = models.ForeignKey('self', blank=True, null=True, related_name='children')
+    parent = models.ForeignKey('self', verbose_name=_('Parent'), blank=True, null=True, related_name='children')
     parent.parent_filter = True # Custom list_filter - see admin/filterspecs.py
     in_navigation = models.BooleanField(_('in navigation'), default=True)
-    override_url = models.CharField(_('override URL'), max_length=400, blank=True,
+    override_url = models.CharField(_('override URL'), max_length=300, blank=True,
         help_text=_('Override the target URL. Be sure to include slashes at the beginning and at the end if it is a local URL. This affects both the navigation and subpages\' URLs.'))
-    redirect_to = models.CharField(_('redirect to'), max_length=400, blank=True,
+    redirect_to = models.CharField(_('redirect to'), max_length=300, blank=True,
         help_text=_('Target URL for automatic redirects.'))
-    _cached_url = models.CharField(_('Cached URL'), max_length=400, blank=True,
+    _cached_url = models.CharField(_('Cached URL'), max_length=300, blank=True,
         editable=False, default='', db_index=True)
 
     request_processors = []
     response_processors = []
-    cache_key_components = [ lambda p: p._django_content_type.id,
+    cache_key_components = [ lambda p: django_settings.SITE_ID,
+                             lambda p: p._django_content_type.id,
                              lambda p: p.id ]
 
     class Meta:
@@ -219,6 +249,9 @@ class Page(Base):
         """
         Check whether this page and all its ancestors are active
         """
+
+        if not self.pk:
+            return False
 
         pages = Page.objects.active().filter(tree_id=self.tree_id, lft__lte=self.lft, rght__gte=self.rght)
         return pages.count() > self.level
@@ -264,6 +297,11 @@ class Page(Base):
 
         cached_page_urls[self.id] = self._cached_url
         super(Page, self).save(*args, **kwargs)
+
+        # Okay, we changed the URL -- remove the old stale entry from the cache
+        if settings.FEINCMS_USE_CACHE:
+            ck = path_to_cache_key( self._original_cached_url.strip('/') )
+            django_cache.delete(ck)
 
         # If our cached URL changed we need to update all descendants to
         # reflect the changes. Since this is a very expensive operation
@@ -328,6 +366,7 @@ class Page(Base):
         """
         request._feincms_page = self
         request._feincms_extra_context = {}
+        request.extra_path = ""
 
         for fn in self.request_processors:
             r = fn(self, request)
@@ -422,7 +461,7 @@ class Page(Base):
             response['ETag'] = etag
 
     @staticmethod
-    def debug_sql_queries_response_processor(verbose=False):
+    def debug_sql_queries_response_processor(verbose=False, file=sys.stderr):
         if not django_settings.DEBUG:
             return lambda self, request, response: None
 
@@ -437,18 +476,18 @@ class Page(Base):
                 pass
 
             if verbose:
-                print "--------------------------------------------------------------"
+                print >> file, "--------------------------------------------------------------"
             time = 0.0
             i = 0
             for q in connection.queries:
                 i += 1
                 if verbose:
-                    print "%d : [%s]\n%s\n" % ( i, q['time'], print_sql(q['sql']))
+                    print >> file, "%d : [%s]\n%s\n" % ( i, q['time'], print_sql(q['sql']))
                 time += float(q['time'])
 
-            print "--------------------------------------------------------------"
-            print "Total: %d queries, %.3f ms" % (i, time)
-            print "--------------------------------------------------------------"
+            print >> file, "--------------------------------------------------------------"
+            print >> file, "Total: %d queries, %.3f ms" % (i, time)
+            print >> file, "--------------------------------------------------------------"
 
         return processor
 
@@ -706,11 +745,12 @@ class PageAdmin(editor.ItemEditor, list_modeladmin):
         return super(PageAdmin, self).change_view(request, object_id, extra_context)
 
     def render_item_editor(self, request, object, context):
-        try:
-            active = Page.objects.active().exclude(pk=object.pk).get(_cached_url=object._cached_url)
-            context['to_replace'] = active
-        except Page.DoesNotExist:
-            pass
+        if object:
+            try:
+                active = Page.objects.active().exclude(pk=object.pk).get(_cached_url=object._cached_url)
+                context['to_replace'] = active
+            except Page.DoesNotExist:
+                pass
 
         return super(PageAdmin, self).render_item_editor(request, object, context)
 

@@ -9,7 +9,9 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ImproperlyConfigured
 from django.db import models
 from django.db.models import Q
+from django.db.models.fields import FieldDoesNotExist
 from django.template.loader import render_to_string
+from django.utils.datastructures import SortedDict
 from django.utils.encoding import force_unicode
 from django.utils.translation import ugettext_lazy as _
 
@@ -77,10 +79,62 @@ class Template(object):
         return force_unicode(self.title)
 
 
+class ContentProxy(object):
+    """
+    This proxy offers attribute-style access to the page contents of regions::
+
+        >> page = Page.objects.all()[0]
+        >> page.content.main
+        [A list of all page contents which are assigned to the region with key 'main']
+    """
+
+    def __init__(self, item):
+        self.item = item
+
+    def __getattr__(self, attr):
+        """
+        Get all item content instances for the specified item and region
+
+        If no item contents could be found for the current item and the region
+        has the inherited flag set, this method will go up the ancestor chain
+        until either some item contents have found or no ancestors are left.
+        """
+        if (attr.startswith('__')):
+            raise AttributeError
+
+        item = self.__dict__['item']
+
+        return self.get_content(item, attr)
+
+    def get_content(self, item, attr):
+        template = item.template
+        try:
+            region = template.regions_dict[attr]
+        except KeyError:
+            return []
+
+        def collect_items(obj):
+            contents = obj._content_for_region(region)
+
+            # go to parent if this model has a parent attribute
+            # TODO: this should be abstracted into a property/method or something
+            # The link which should be followed is not always '.parent'
+            if region.inherited and not contents and hasattr(obj, 'parent_id') and obj.parent_id:
+                return collect_items(obj.parent)
+
+            return contents
+
+        contents = collect_items(item)
+        contents.sort(key=lambda c: c.ordering)
+        return contents
+
+
 class Base(models.Model):
     """
     This is the base class for your CMS models.
     """
+
+    content_proxy_class = ContentProxy
 
     class Meta:
         abstract = True
@@ -97,6 +151,13 @@ class Base(models.Model):
                 ('main', _('Main content area')),
                 )
         """
+
+        if hasattr(cls, 'template'):
+            import warnings
+            warnings.warn(
+                'Ignoring second call to register_regions.',
+                RuntimeWarning)
+            return
 
         # implicitly creates a dummy template object -- the item editor
         # depends on the presence of a template.
@@ -129,30 +190,36 @@ class Base(models.Model):
                 })
         """
 
-        instances = {}
-        choices = []
+        if not hasattr(cls, '_feincms_templates'):
+            cls._feincms_templates = SortedDict()
+            cls.TEMPLATES_CHOICES = []
+
+        instances = getattr(cls, '_feincms_templates', SortedDict())
 
         for template in templates:
             if not isinstance(template, Template):
                 template = Template(**template)
 
             instances[template.key] = template
-            choices.append((template.key, template.title))
 
-        cls.TEMPLATE_CHOICES = choices
+        try:
+            field = cls._meta.get_field_by_name('template_key')[0]
+        except (FieldDoesNotExist, IndexError):
+            cls.add_to_class('template_key', models.CharField(_('template'), max_length=255, choices=()))
+            field = cls._meta.get_field_by_name('template_key')[0]
 
-        cls.add_to_class('template_key', models.CharField(_('template'), max_length=255,
-            choices=cls.TEMPLATE_CHOICES, default=choices[0][0]))
+            def _template(self):
+                return self._feincms_templates[self.template_key]
 
-        cls._feincms_templates = instances
+            cls.template = property(_template)
 
-        def _template(self):
-            return self._feincms_templates[self.template_key]
+        cls.TEMPLATE_CHOICES = field._choices = [(template.key, template.title)
+            for template in cls._feincms_templates.values()]
+        field.default = field.choices[0][0]
 
-        cls.template = property(_template)
-        cls._feincms_all_regions = []
+        cls._feincms_all_regions = set()
         for template in cls._feincms_templates.values():
-            cls._feincms_all_regions += template.regions
+            cls._feincms_all_regions = cls._feincms_all_regions.union(template.regions)
 
     @classmethod
     def register_extension(cls, register_fn):
@@ -177,13 +244,17 @@ class Base(models.Model):
                 continue
 
             try:
-                try:
-                    fn = get_object(ext + '.register')
-                except ImportError:
+                if isinstance(ext, basestring):
                     try:
-                        fn = get_object('%s.%s.register' % ( here_path, ext ) )
+                        fn = get_object(ext + '.register')
                     except ImportError:
-                        fn = get_object('%s.%s.register' % ( common_path, ext ) )
+                        try:
+                            fn = get_object('%s.%s.register' % ( here_path, ext ) )
+                        except ImportError:
+                            fn = get_object('%s.%s.register' % ( common_path, ext ) )
+                # Not a string, so take our chances and just try to access "register"
+                else:
+                    fn = ext.register
 
                 cls.register_extension(fn)
                 cls._feincms_extensions.add(ext)
@@ -198,7 +269,7 @@ class Base(models.Model):
         """
 
         if not hasattr(self, '_content_proxy'):
-            self._content_proxy = ContentProxy(self)
+            self._content_proxy = self.content_proxy_class(self)
 
         return self._content_proxy
 
@@ -279,6 +350,7 @@ class Base(models.Model):
 
         class Meta:
             abstract = True
+            app_label = cls._meta.app_label
             ordering = ['ordering']
 
         def __unicode__(self):
@@ -358,11 +430,17 @@ class Base(models.Model):
         cls._feincms_content_types = []
 
         # list of item editor context processors, will be extended by content types
-        cls.feincms_item_editor_context_processors = []
+        if hasattr(cls, 'feincms_item_editor_context_processors'):
+            cls.feincms_item_editor_context_processors = list(cls.feincms_item_editor_context_processors)
+        else:
+            cls.feincms_item_editor_context_processors = []
 
         # list of templates which should be included in the item editor, will be extended
         # by content types
-        cls.feincms_item_editor_includes = {}
+        if hasattr(cls, 'feincms_item_editor_includes'):
+            cls.feincms_item_editor_includes = dict(cls.feincms_item_editor_includes)
+        else:
+            cls.feincms_item_editor_includes = {}
 
     @classmethod
     def create_content_type(cls, model, regions=None, **kwargs):
@@ -432,7 +510,7 @@ class Base(models.Model):
 
         # content types can be limited to a subset of regions
         if not regions:
-            regions = [region.key for region in cls._feincms_all_regions]
+            regions = set([region.key for region in cls._feincms_all_regions])
 
         for region in cls._feincms_all_regions:
             if region.key in regions:
@@ -466,6 +544,27 @@ class Base(models.Model):
         if hasattr(model, 'feincms_item_editor_includes'):
             for key, includes in model.feincms_item_editor_includes.items():
                 cls.feincms_item_editor_includes.setdefault(key, set()).update(includes)
+
+        # Ensure meta information concerning related fields is up-to-date.
+        #
+        # Upon accessing the related fields information from Model._meta, the related
+        # fields are cached and never refreshed again (because models and model relations
+        # are defined upon import time, if you do not fumble around with models like we
+        # do right here.)
+        #
+        # Adding related models after this information has been cached leads to models
+        # not knowing about related items, which again causes the bug we had in
+        # issue #63 on github:
+        #
+        # http://github.com/matthiask/feincms/issues/issue/63/
+        #
+        # Currently, all methods filling up the Model.meta cache start with fill_.
+        # We call all these methods upon creation of a new content type to make sure
+        # that we really really do not forget a relation somewhere. Of course, we do
+        # too much here, but better a bit too much upon application startup than not
+        # enough like before.
+        for fn in [s for s in dir(cls._meta) if s[:6]=='_fill_']:
+            getattr(cls._meta, fn)()
 
         return new_type
 
@@ -524,50 +623,3 @@ class Base(models.Model):
         for cls in self._feincms_content_types:
             cls.objects.filter(parent=self).delete()
         self.copy_content_from(obj)
-
-
-class ContentProxy(object):
-    """
-    This proxy offers attribute-style access to the page contents of regions::
-
-        >> page = Page.objects.all()[0]
-        >> page.content.main
-        [A list of all page contents which are assigned to the region with key 'main']
-    """
-
-    def __init__(self, item):
-        self.item = item
-
-    def __getattr__(self, attr):
-        """
-        Get all item content instances for the specified item and region
-
-        If no item contents could be found for the current item and the region
-        has the inherited flag set, this method will go up the ancestor chain
-        until either some item contents have found or no ancestors are left.
-        """
-        if (attr.startswith('__')):
-            raise AttributeError
-
-        item = self.__dict__['item']
-
-        try:
-            region = item.template.regions_dict[attr]
-        except KeyError:
-            return []
-
-        def collect_items(obj):
-            contents = obj._content_for_region(region)
-
-            # go to parent if this model has a parent attribute
-            # TODO: this should be abstracted into a property/method or something
-            # The link which should be followed is not always '.parent'
-            if region.inherited and not contents and hasattr(obj, 'parent_id') and obj.parent_id:
-                return collect_items(obj.parent)
-
-            return contents
-
-        contents = collect_items(item)
-        contents.sort(key=lambda c: c.ordering)
-        return contents
-
