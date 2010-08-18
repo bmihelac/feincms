@@ -10,6 +10,7 @@ except ImportError:
 
 from django import template
 from django.conf import settings
+from django.utils.encoding import force_unicode
 
 
 register = template.Library()
@@ -31,7 +32,10 @@ def thumbnail(filename, size='200x200'):
     # defining the size
     x, y = [tryint(x) for x in size.split('x')]
     # defining the filename and the miniature filename
-    basename, format = filename.rsplit('.', 1)
+    try:
+        basename, format = filename.rsplit('.', 1)
+    except ValueError:
+        basename, format = filename, 'jpg'
     miniature = basename + '_thumb_' + size + '.' +  format
     miniature_filename = os.path.join(settings.MEDIA_ROOT, miniature).encode('utf-8')
     miniature_url = os.path.join(settings.MEDIA_URL, miniature).encode('utf-8')
@@ -44,7 +48,7 @@ def thumbnail(filename, size='200x200'):
             return os.path.join(settings.MEDIA_URL, filename)
         image.thumbnail([x, y], Image.ANTIALIAS)
         image.save(miniature_filename, image.format, quality=100)
-    return miniature_url
+    return force_unicode(miniature_url)
 
 
 @register.filter
@@ -55,7 +59,10 @@ def cropscale(filename, size='200x200'):
 
     w, h = [tryint(x) for x in size.split('x')]
 
-    basename, format = filename.rsplit('.', 1)
+    try:
+        basename, format = filename.rsplit('.', 1)
+    except ValueError:
+        basename, format = filename, 'jpg'
     miniature = basename + '_cropscale_' + size + '.' +  format
     miniature_filename = os.path.join(settings.MEDIA_ROOT, miniature)
     miniature_url = os.path.join(settings.MEDIA_URL, miniature)
@@ -86,6 +93,4 @@ def cropscale(filename, size='200x200'):
         image = image.crop((x_offset, y_offset, x_offset+int(crop_width), y_offset+int(crop_height)))
         image = image.resize((dst_width, dst_height), Image.ANTIALIAS)
         image.save(miniature_filename, image.format, quality=100)
-
-    return miniature_url
-
+    return force_unicode(miniature_url)
