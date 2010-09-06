@@ -209,7 +209,13 @@ class Base(models.Model):
             field = cls._meta.get_field_by_name('template_key')[0]
 
             def _template(self):
-                return self._feincms_templates[self.template_key]
+                try:
+                    return self._feincms_templates[self.template_key]
+                except KeyError:
+                    # return first template as a fallback if the template
+                    # has changed in-between
+                    return self._feincms_templates[
+                        self._feincms_templates.keys()[0]]
 
             cls.template = property(_template)
 
@@ -217,12 +223,10 @@ class Base(models.Model):
             for template in cls._feincms_templates.values()]
         field.default = field.choices[0][0]
 
-        # FIXME: The set does not do what we intended to do, since each
-        # template object is distinct from all the others. Need to uniq
-        # on template key or something
+        # Build a set of all regions used anywhere
         cls._feincms_all_regions = set()
         for template in cls._feincms_templates.values():
-            cls._feincms_all_regions = cls._feincms_all_regions.union(template.regions)
+            cls._feincms_all_regions.update(template.regions)
 
     @classmethod
     def register_extension(cls, register_fn):
