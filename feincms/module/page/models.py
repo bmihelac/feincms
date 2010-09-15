@@ -20,7 +20,7 @@ from django.db.transaction import commit_on_success
 
 import mptt
 
-from feincms import settings
+from feincms import settings, ensure_completely_loaded
 from feincms.admin import editor
 from feincms.admin import item_editor
 from feincms.management.checker import check_database_schema
@@ -459,7 +459,7 @@ class Page(Base):
         """
         etag = self.etag(request)
         if etag is not None:
-            response['ETag'] = etag
+            response['ETag'] = '"' + etag + '"'
 
     @staticmethod
     def debug_sql_queries_response_processor(verbose=False, file=sys.stderr):
@@ -656,7 +656,7 @@ class PageAdmin(editor.ItemEditor, list_modeladmin):
         item_editor.FEINCMS_CONTENT_FIELDSET,
         (_('Other options'), {
             'classes': ['collapse',],
-            'fields': [],
+            'fields': ['override_url', 'redirect_to'],
         }),
         ]
     readonly_fields = []
@@ -669,6 +669,8 @@ class PageAdmin(editor.ItemEditor, list_modeladmin):
     radio_fields = {'template_key': admin.HORIZONTAL}
 
     def __init__(self, *args, **kwargs):
+        ensure_completely_loaded()
+
         if len(Page._feincms_templates) > 4:
             del(self.radio_fields['template_key'])
 
@@ -684,7 +686,7 @@ class PageAdmin(editor.ItemEditor, list_modeladmin):
 
         for f in self.model._meta.fields:
             if not f.name.startswith('_') and not f.name in ('id', 'lft', 'rght', 'tree_id', 'level') and \
-               not f.auto_created and not f.name in present_fields:
+                    not f.auto_created and not f.name in present_fields and f.editable:
                 self.fieldsets[-1][1]['fields'].append(f.name)
                 if not f.editable:
                     self.readonly_fields.append(f.name)
