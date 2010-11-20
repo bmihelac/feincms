@@ -24,7 +24,7 @@ from feincms import settings, ensure_completely_loaded
 from feincms.admin import editor
 from feincms.admin import item_editor
 from feincms.management.checker import check_database_schema
-from feincms.models import Base
+from feincms.models import Base, create_base_model
 from feincms.utils import get_object, copy_model_instance
 import feincms.admin.filterspecs
 
@@ -39,6 +39,10 @@ class ActiveAwareContentManagerMixin(object):
     A Manager for a content class using the "datepublisher" extension
     should either adopt this mixin or implement a similar interface.
     """
+
+    # A list of filters which are used to determine whether a page is active or not.
+    # Extended for example in the datepublisher extension (date-based publishing and
+    # un-publishing of pages)
     active_filters = ()
 
     @classmethod
@@ -79,13 +83,10 @@ def path_to_cache_key(path):
 
 class PageManager(models.Manager, ActiveAwareContentManagerMixin):
 
-    # A list of filters which are used to determine whether a page is active or not.
-    # Extended for example in the datepublisher extension (date-based publishing and
-    # un-publishing of pages)
-
     # The fields which should be excluded when creating a copy. The mptt fields are
     # excluded automatically by other mechanisms
-    exclude_from_copy = ['id', 'tree_id', 'lft', 'rght', 'level']
+    # ???: Then why are the mptt fields listed here?
+    exclude_from_copy = ['id', 'tree_id', 'lft', 'rght', 'level', 'redirect_to']
 
     def page_for_path(self, path, raise404=False):
         """
@@ -116,8 +117,8 @@ class PageManager(models.Manager, ActiveAwareContentManagerMixin):
         Return the best match for a path. If the path as given is unavailable,
         continues to search by chopping path components off the end.
 
-        Tries hard to avoid unnecessary database lookups by generating all poss
-        matching url prefixes and choosing the longtest match.
+        Tries hard to avoid unnecessary database lookups by generating all
+        possible matching URL prefixes and choosing the longtest match.
 
         Page.best_match_for_path('/photos/album/2008/09') might return the
         page with url '/photos/album'.
@@ -212,6 +213,17 @@ PageManager.add_to_active_filters( Q(active=True) )
 
 # MARK: -
 # ------------------------------------------------------------------------
+
+try:
+    # MPTT 0.4
+    from mptt.models import MPTTModel
+    mptt_register = False
+    Base = create_base_model(MPTTModel)
+except ImportError:
+    # MPTT 0.3
+    mptt_register = True
+
+
 class Page(Base):
 
     active = models.BooleanField(_('active'), default=False)
@@ -222,7 +234,7 @@ class Page(Base):
     slug = models.SlugField(_('slug'), max_length=150)
     parent = models.ForeignKey('self', verbose_name=_('Parent'), blank=True, null=True, related_name='children')
     parent.parent_filter = True # Custom list_filter - see admin/filterspecs.py
-    in_navigation = models.BooleanField(_('in navigation'), default=True)
+    in_navigation = models.BooleanField(_('in navigation'), default=False)
     override_url = models.CharField(_('override URL'), max_length=300, blank=True,
         help_text=_('Override the target URL. Be sure to include slashes at the beginning and at the end if it is a local URL. This affects both the navigation and subpages\' URLs.'))
     redirect_to = models.CharField(_('redirect to'), max_length=300, blank=True,
@@ -268,6 +280,23 @@ class Page(Base):
 
         queryset = PageManager.apply_active_filters(self.get_ancestors())
         return queryset.count() >= self.level
+
+    def active_children(self):
+        """
+        Returns a queryset describing all active children of the current page.
+        This is different than page.get_descendants (from mptt) as it will
+        additionally select only child pages that are active.
+        """
+        return Page.objects.active().filter(parent=self)
+
+    def active_children_in_navigation(self):
+        """
+        Returns a queryset describing all active children that also have the
+        in_navigation flag set. This might be used eg. in building navigation
+        menues (only show a disclosure indicator if there actually is something
+        to disclose).
+        """
+        return self.active_children().filter(in_navigation=True)
 
     def short_title(self):
         """
@@ -506,7 +535,8 @@ class Page(Base):
 
 
 # ------------------------------------------------------------------------
-mptt.register(Page)
+if mptt_register: # MPTT 0.3 legacy support
+    mptt.register(Page)
 
 # Our default request processors
 Page.register_request_processors(Page.require_path_active_request_processor,

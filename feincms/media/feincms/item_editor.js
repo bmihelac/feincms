@@ -32,15 +32,15 @@ if(!Array.indexOf) {
         fieldset.children(".item-content").append(form); //relocates, not clone
 
         $("<div>").addClass("item-controls").appendTo(fieldset);
-        
+
         return fieldset;
     }
 
-    
+
     function update_item_controls(item, target_region_id){
         var item_controls = item.find(".item-controls");
         item_controls.find(".item-control-units").remove(); // Remove all controls, if any.
-        
+
         // (Re)build controls
         var control_units = $("<div>").addClass("item-control-units").appendTo(item_controls);
 
@@ -68,22 +68,22 @@ if(!Array.indexOf) {
         if (REGION_MAP.length > 1) {
             var wrp = [];
             wrp.push('<div class="item-control-unit move-control"><span>'+feincms_gettext('Move to')+': </span><select name="item-move-select">');
-            
+
             for (var i=0; i < REGION_MAP.length; i++) {
                 if (i != target_region_id) { // Do not put the target region in the list
                     wrp.push('<option value="'+REGION_MAP[i]+'">'+REGION_NAMES[i]+'</option>');
                 }
             }
             wrp.push('</select><input type="button" class="button" value="'+feincms_gettext('Move')+'" /></div>');
-        
-            var move_control = $(wrp.join(""));      
+
+            var move_control = $(wrp.join(""));
             move_control.find(".button").click(function(){
                 var move_to = $(this).prev().val();
                 move_item(REGION_MAP.indexOf(move_to), item);
             });
             control_units.append(move_control); // Add new one
         }
-        
+
         // Controls animations
         item_controls.find("*").hide();
         var is_hidden = true;
@@ -105,11 +105,11 @@ if(!Array.indexOf) {
         item_controls.unbind('mouseenter'); // Unbind in case it's already been bound.
         item_controls.mouseenter(function() {
             clearTimeout(mouseleave_timeout);
-            if (is_hidden) mouseenter_timeout = setTimeout(show_controls, 200); // To prevent the control bar to appear when mouse accidentally enters the zone. 
+            if (is_hidden) mouseenter_timeout = setTimeout(show_controls, 200); // To prevent the control bar to appear when mouse accidentally enters the zone.
         });
     }
-    
-    
+
+
     function create_new_fieldset_from_module(modvar, modname) {
         var new_form = create_new_spare_form(modvar);
         return create_new_item_from_form(new_form, modname);
@@ -168,12 +168,16 @@ if(!Array.indexOf) {
             // Use Django's built-in inline spawing mechanism (Django 1.2+)
             // must use django.jQuery since the bound function lives there:
             var returned = django.jQuery('#'+modvar+'_set-group').find(
-                '.add-row a').triggerHandler('click');
+                'div.add-row > a').triggerHandler('click');
             if(returned==false) break; // correct return value
         }
         var new_form_count = $('#id_'+modvar+'_set-TOTAL_FORMS').val();
         if(new_form_count > old_form_count){
-            return $('#'+modvar+'_set-'+(new_form_count-1));
+            var new_form = $('#'+modvar+'_set-'+(new_form_count-1));
+            new_form.addClass("dynamic-form");
+            // earmark as dynamically created form, also allows
+            // django's inline deletion javascript function to operate
+            return new_form;
         }
         // TODO: add fallback for older versions by manually cloning
         // empty fieldset (provided using extra=1)
@@ -220,7 +224,7 @@ if(!Array.indexOf) {
             $.each(classes, function() {
                 if(this.match('^item-richtext-')) {
                     var remove_func = undefined;
-                    try { remove_func = eval('feincms.richtext_remove_' + this.substr(14)); } catch(e) {}
+                    try { remove_func = eval('feincms_richtext_remove_' + this.substr(14)); } catch(e) {}
                     if(typeof(remove_func) == 'function'){
                         remove_func(field);
                     }
@@ -240,7 +244,7 @@ if(!Array.indexOf) {
             $.each(classes, function() {
                 if(this.match('^item-richtext-')) {
                     var add_func = undefined;
-                    try { add_func = eval('feincms.richtext_add_' + this.substr(14)); } catch(e) {}
+                    try { add_func = eval('feincms_richtext_add_' + this.substr(14)); } catch(e) {}
                     if(typeof(add_func) == 'function'){
                         add_func(field);
                     }
@@ -331,12 +335,25 @@ if(!Array.indexOf) {
         });
 
         $("h2 img.item-delete").live('click', function(){
-            popup_bg = '<div class="popup_bg"></div>';
+            var popup_bg = '<div class="popup_bg"></div>';
             $("body").append(popup_bg);
             var item = $(this).parents(".order-item");
             jConfirm(DELETE_MESSAGES[0], DELETE_MESSAGES[1], function(r) {
                 if (r==true) {
-                    set_item_field_value(item,"delete-field","checked");
+                    var dynamic_form = item.find(".dynamic-form");
+                    if(dynamic_form.length==1){ // not saved on server
+                        // could trigger django's deletion handler, which would
+                        // handle reindexing other inlines, etc, but seems to
+                        // cause errors, and is apparently unnecessary...
+                        //dynamic_form.attr('id', 'form_to_delete');
+                        //django.jQuery('#form_to_delete').find('a.inline-deletelink').triggerHandler('click');
+
+                        // just remove it
+                        dynamic_form.remove();
+                    }
+                    else{ // saved on server, don't remove form
+                        set_item_field_value(item,"delete-field","checked");
+                    }
                     item.fadeOut(200);
                 }
                 $(".popup_bg").remove();

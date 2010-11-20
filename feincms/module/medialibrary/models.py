@@ -7,6 +7,7 @@ from datetime import datetime
 from django.contrib import admin
 from django.contrib.auth.decorators import permission_required
 from django.conf import settings as django_settings
+from django.core.urlresolvers import get_callable
 from django.db import models
 from django.template.defaultfilters import filesizeformat
 from django.utils.safestring import mark_safe
@@ -28,6 +29,7 @@ import os
 import logging
 from PIL import Image
 
+# ------------------------------------------------------------------------
 class CategoryManager(models.Manager):
     """
     Simple manager which exists only to supply ``.select_related("parent")``
@@ -76,9 +78,12 @@ class CategoryAdmin(admin.ModelAdmin):
 # ------------------------------------------------------------------------
 class MediaFileBase(Base, TranslatedObjectMixin):
 
-    # XXX maybe have a look at settings.DEFAULT_FILE_STORAGE here?
     from django.core.files.storage import FileSystemStorage
-    fs = FileSystemStorage(location=settings.FEINCMS_MEDIALIBRARY_ROOT,
+    default_storage_class = getattr(django_settings, 'DEFAULT_FILE_STORAGE', 
+                                    'django.core.files.storage.FileSystemStorage')
+    default_storage = get_callable(default_storage_class)
+        
+    fs = default_storage(location=settings.FEINCMS_MEDIALIBRARY_ROOT,
                            base_url=settings.FEINCMS_MEDIALIBRARY_URL)
 
     file = models.FileField(_('file'), max_length=255, upload_to=settings.FEINCMS_MEDIALIBRARY_UPLOAD_TO, storage=fs)
@@ -134,6 +139,11 @@ class MediaFileBase(Base, TranslatedObjectMixin):
         cls.filetypes_dict = dict(choices)
         cls._meta.get_field('type').choices[:] = choices
 
+    def __init__(self, *args, **kwargs):
+        super(MediaFileBase, self).__init__(*args, **kwargs)
+        if self.file and self.file.path:
+            self._original_file_path = self.file.path
+
     def __unicode__(self):
         trans = None
 
@@ -159,9 +169,12 @@ class MediaFileBase(Base, TranslatedObjectMixin):
     def file_type(self):
         t = self.filetypes_dict[self.type]
         if self.type == 'image':
-            from django.core.files.images import get_image_dimensions
-            d = get_image_dimensions(self.file.file)
-            if d: t += "<br/>%d&times;%d" % ( d[0], d[1] )
+            try:
+                from django.core.files.images import get_image_dimensions
+                d = get_image_dimensions(self.file.file)
+                if d: t += "<br/>%d&times;%d" % ( d[0], d[1] )
+            except IOError, e:
+                t += "<br/>(%s)" % e.strerror
         return t
     file_type.admin_order_field = 'type'
     file_type.short_description = _('file type')
@@ -244,6 +257,13 @@ class MediaFileBase(Base, TranslatedObjectMixin):
             except (OSError, IOError), e:
                 self.type = self.determine_file_type('***') # It's binary something
 
+        if getattr(self, '_original_file_path', None):
+            if self.file.path != self._original_file_path:
+                try:
+                    os.unlink(self._original_file_path)
+                except:
+                    pass
+
         super(MediaFileBase, self).save(*args, **kwargs)
         self.purge_translation_cache()
 
@@ -257,6 +277,7 @@ MediaFileBase.register_filetypes(
         ('swf', _('Flash'), lambda f: f.lower().endswith('.swf')),
         ('txt', _('Text'), lambda f: f.lower().endswith('.txt')),
         ('rtf', _('Rich Text'), lambda f: f.lower().endswith('.rtf')),
+        ('zip', _('Zip archive'), lambda f: f.lower().endswith('.zip')),
         ('doc', _('Microsoft Word'), lambda f: re.compile(r'\.docx?$', re.IGNORECASE).search(f)),
         ('xls', _('Microsoft Excel'), lambda f: re.compile(r'\.xlsx?$', re.IGNORECASE).search(f)),
         ('ppt', _('Microsoft PowerPoint'), lambda f: re.compile(r'\.pptx?$', re.IGNORECASE).search(f)),
@@ -308,6 +329,7 @@ def admin_thumbnail(obj):
 admin_thumbnail.short_description = _('Preview')
 admin_thumbnail.allow_tags = True
 
+#-------------------------------------------------------------------------
 class MediaFileAdmin(admin.ModelAdmin):
     date_hierarchy    = 'created'
     inlines           = [MediaFileTranslationInline]
@@ -327,6 +349,12 @@ class MediaFileAdmin(admin.ModelAdmin):
 
         return my_urls + urls
 
+    def changelist_view(self, request, extra_context=None):
+        if extra_context is None:
+            extra_context = {}
+        extra_context['categories'] = Category.objects.all()
+        return super(MediaFileAdmin, self).changelist_view(request, extra_context=extra_context)
+
     @staticmethod
     # 1.2 @csrf_protect
     @permission_required('medialibrary.add_mediafile')
@@ -334,9 +362,13 @@ class MediaFileAdmin(admin.ModelAdmin):
         from django.core.urlresolvers import reverse
         from django.utils.functional import lazy
 
-        def import_zipfile(request, data):
+        def import_zipfile(request, category_id, data):
             import zipfile
             from os import path
+
+            category = None
+            if category_id:
+                category = Category.objects.get(pk=int(category_id))
 
             try:
                 z = zipfile.ZipFile(data)
@@ -360,6 +392,8 @@ class MediaFileAdmin(admin.ModelAdmin):
                             mf = MediaFile()
                             mf.file.save(target_fname, ContentFile(z.read(zi.filename)))
                             mf.save()
+                            if category:
+                                mf.categories.add(category)
                             count += 1
 
                 request.user.message_set.create(message="%d files imported" % count)
@@ -370,7 +404,7 @@ class MediaFileAdmin(admin.ModelAdmin):
             pass
 
         if request.method == 'POST' and 'data' in request.FILES:
-            import_zipfile(request, request.FILES['data'])
+            import_zipfile(request, request.POST.get('category'), request.FILES['data'])
         else:
             request.user.message_set.create(message="No input file given")
 
