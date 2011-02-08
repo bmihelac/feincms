@@ -14,13 +14,13 @@ try:
 except pkg_resources.DistributionNotFound:
     try:
         import django
-        if django.VERSION[0] >= 1 and django.VERSION[1] >= 1 and django.VERSION[2] >= 1:
+        if django.VERSION[0] >= 1 and django.VERSION[1] >= 2 and django.VERSION[2] >= 0:
             add_django_dependency = False
     except ImportError:
         pass
 
 Distribution({
-    "setup_requires": add_django_dependency and  ['Django >=1.1.1'] or []
+    "setup_requires": add_django_dependency and  ['Django >=1.2.0'] or []
 })
 
 import feincms
@@ -47,12 +47,12 @@ setup(name='FeinCMS',
         'Topic :: Software Development :: Libraries :: Application Frameworks',
     ],
     install_requires=[
-        #'Django >=1.1.1' # See http://github.com/matthiask/feincms/issues/closed#issue/50
+        #'Django >=1.2.0' # See http://github.com/matthiask/feincms/issues/closed#issue/50
     ],
     requires=[
         #'lxml', # only needed for rich text cleansing
         'tagging (>0.2.1)', # please use SVN trunk
-        'django_mptt (>0.2.1)', # please use the version from http://github.com/matthiask/django-mptt/
+        'django_mptt (>0.2.1)', # please use the version from http://github.com/django-mptt/django-mptt/
     ],
     packages=['feincms',
         'feincms.admin',
