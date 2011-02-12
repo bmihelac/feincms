@@ -470,10 +470,12 @@ def create_base_model(inherit_from=models.Model):
             right, centered) through to the content type.
             """
 
+            content_type_class_name = '%s%s' % (cls.__name__, model.__name__)
+
             # prevent double registration and registration of two different content types
             # with the same class name because of related_name clashes
             try:
-                getattr(cls, '%s_set' % model.__name__.lower())
+                getattr(cls, content_type_class_name)
                 import warnings
                 warnings.warn(
                     'Cannot create content type using %s.%s for %s.%s, because %s_set is already taken.' % (
@@ -508,10 +510,16 @@ def create_base_model(inherit_from=models.Model):
                                               # base models at the same time (f.e. in
                                               # the blog and the page module).
                 'Meta': Meta,
+                'content_type_name': model.__name__.lower(),
                 }
 
+            # we remove cls name in related_name of content type
+            # to retain backward compatibility:
+            # Page.rawcontent_set instead of Page.pagerawcontent_set
+            related_name = '%s_set' % model.__name__.lower()
+            feincms_content_base._meta.get_field('parent').rel.related_name = related_name
             new_type = type(
-                model.__name__,
+                content_type_class_name,
                 (model, feincms_content_base,),
                 attrs)
             cls._feincms_content_types.append(new_type)

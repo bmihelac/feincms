@@ -111,8 +111,8 @@ class CMSBaseTest(TestCase):
         # content_type_for should return None if it does not have a subclass registered
         self.assertEqual(ExampleCMSBase.content_type_for(Empty), None)
 
-        self.assertTrue('filecontent' not in dict(ExampleCMSBase.template.regions[0].content_types).keys())
-        self.assertTrue('filecontent' in dict(ExampleCMSBase.template.regions[1].content_types).keys())
+        self.assertTrue('examplecmsbasefilecontent' not in dict(ExampleCMSBase.template.regions[0].content_types).keys())
+        self.assertTrue('examplecmsbasefilecontent' in dict(ExampleCMSBase.template.regions[1].content_types).keys())
 
     def test_02_rsscontent_creation(self):
         # this test resides in its own method because the required feedparser
@@ -502,11 +502,11 @@ class PagesTestCase(TestCase):
         page = Page.objects.get(pk=1)
         response = self.create_pagecontent(page)
         self.assertRedirects(response, '/admin/page/page/')
-        self.assertEqual(page.content.main[0].__class__.__name__, 'RawContent')
+        self.assertEqual(page.content.main[0].__class__.__name__, 'PageRawContent')
 
         page2 = Page.objects.get(pk=2)
         page2.symlinked_page = page
-        self.assertEqual(page2.content.main[0].__class__.__name__, 'RawContent')
+        self.assertEqual(page2.content.main[0].__class__.__name__, 'PageRawContent')
         self.assertEqual(unicode(page2.content.main[0]),
                          'main on Test page, ordering 0')
 
@@ -668,12 +668,12 @@ class PagesTestCase(TestCase):
         self.create_pagecontent(page)
 
         # this should return a 404
-        self.is_published('/admin/page/page/10|rawcontent|1/', should_be=False)
-        self.is_published('/admin/page/page/1|rawcontent|10/', should_be=False)
+        self.is_published('/admin/page/page/10|pagerawcontent|1/', should_be=False)
+        self.is_published('/admin/page/page/1|pagerawcontent|10/', should_be=False)
 
-        self.assertEqual(self.client.get('/admin/page/page/1|rawcontent|1/').status_code, 200)
-        self.assertEqual(self.client.post('/admin/page/page/1|rawcontent|1/', {
-            'rawcontent-text': 'blablabla',
+        self.assertEqual(self.client.get('/admin/page/page/1|pagerawcontent|1/').status_code, 200)
+        self.assertEqual(self.client.post('/admin/page/page/1|pagerawcontent|1/', {
+            'pagerawcontent-text': 'blablabla',
             }).status_code, 200)
 
         self.assertEqual(page.content.main[0].render(), 'blablabla')
