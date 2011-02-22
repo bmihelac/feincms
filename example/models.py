@@ -1,9 +1,10 @@
+from functools import partial
+
 from django import forms
 from django.db import models
 from django.utils.text import capfirst
 from django.utils.translation import ugettext_lazy as _
 from django.contrib.sites.models import Site
-from django.contrib.sites.admin import SiteAdmin
 
 from feincms.module.blog.models import Entry, EntryAdmin
 from feincms.module.page.models import Page
@@ -14,7 +15,8 @@ from feincms.content.application.models import ApplicationContent
 from feincms.module.page.extensions.navigation import NavigationExtension, PagePretender
 from feincms.content.application.models import reverse
 from feincms.models import Base
-from feincms.admin import item_editor
+from feincms_admin import CMSSiteAdmin
+from feincms.module.extensions import seo
 
 import mptt
 
@@ -111,14 +113,11 @@ EntryAdmin.list_filter += ('categories',)
 class CMSSite(Site, Base):
     @classmethod
     def register_extension(cls, register_fn):
-        register_fn(cls, CMSSiteAdmin)
+        register_fn(cls)
 
 CMSSite.register_regions(
     ('main', 'Main region'),
     )
 CMSSite.create_content_type(RawContent)
 
-class CMSSiteAdmin(SiteAdmin, item_editor.ItemEditor):
-    pass
-
-CMSSite.register_extensions('feincms.module.extensions.seo')
+CMSSite.register_extension(partial(seo.register, admin_cls=CMSSiteAdmin))

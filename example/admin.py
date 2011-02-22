@@ -2,7 +2,8 @@ from django.contrib import admin
 
 from feincms.admin import editor
 
-from example.models import Category, CMSSite, CMSSiteAdmin
+from example.models import Category, CMSSite
+from example.feincms_admin import CMSSiteAdmin
 
 
 class CategoryAdmin(editor.TreeEditor):
