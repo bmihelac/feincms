@@ -2,6 +2,8 @@ from django import forms
 from django.db import models
 from django.utils.text import capfirst
 from django.utils.translation import ugettext_lazy as _
+from django.contrib.sites.models import Site
+from django.contrib.sites.admin import SiteAdmin
 
 from feincms.module.blog.models import Entry, EntryAdmin
 from feincms.module.page.models import Page
@@ -11,6 +13,8 @@ from feincms.content.medialibrary.models import MediaFileContent
 from feincms.content.application.models import ApplicationContent
 from feincms.module.page.extensions.navigation import NavigationExtension, PagePretender
 from feincms.content.application.models import reverse
+from feincms.models import Base
+from feincms.admin import item_editor
 
 import mptt
 
@@ -98,3 +102,23 @@ if mptt_register:
 # add m2m field to entry so it shows up in entry admin
 Entry.add_to_class('categories', models.ManyToManyField(Category, blank=True, null=True))
 EntryAdmin.list_filter += ('categories',)
+
+# Extending example
+# extending Site model from sites framework
+#
+# to be able to register extension currently we need to have CMSSiteAdmin class
+# in same model as CMSSite
+class CMSSite(Site, Base):
+    @classmethod
+    def register_extension(cls, register_fn):
+        register_fn(cls, CMSSiteAdmin)
+
+CMSSite.register_regions(
+    ('main', 'Main region'),
+    )
+CMSSite.create_content_type(RawContent)
+
+class CMSSiteAdmin(SiteAdmin, item_editor.ItemEditor):
+    pass
+
+CMSSite.register_extensions('feincms.module.extensions.seo')
