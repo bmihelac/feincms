@@ -1,6 +1,7 @@
 import os
 
 from django.conf.urls.defaults import *
+import example.models
 
 from django.contrib import admin
 admin.autodiscover()
