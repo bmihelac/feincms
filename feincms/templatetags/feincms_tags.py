@@ -20,7 +20,7 @@ def _render_content(content, **kwargs):
             return
         setattr(request, 'feincms_render_level', level + 1)
 
-    #temporarily fix for issue #228
+    #temporarily workaround for issue #228
     #try:
         #r = content.fe_render(**kwargs)
     #except AttributeError:

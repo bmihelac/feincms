@@ -92,8 +92,9 @@ class Handler(object):
         page.finalize_response(request, response)
 
         # Add never cache headers in case frontend editing is active
-        if hasattr(request, "session") and request.session.get('frontend_editing', False):
-            add_never_cache_headers(response)
+        # NOTE: 228 workaround
+        #if hasattr(request, "session") and request.session.get('frontend_editing', False):
+            #add_never_cache_headers(response)
 
         return response
     
