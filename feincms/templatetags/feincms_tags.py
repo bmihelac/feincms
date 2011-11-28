@@ -20,10 +20,11 @@ def _render_content(content, **kwargs):
             return
         setattr(request, 'feincms_render_level', level + 1)
 
-    try:
-        r = content.fe_render(**kwargs)
-    except AttributeError:
-        r = content.render(**kwargs)
+    #temporarily fix for issue #228
+    #try:
+        #r = content.fe_render(**kwargs)
+    #except AttributeError:
+    r = content.render(**kwargs)
 
     if request is not None:
         level = getattr(request, 'feincms_render_level', 1)
