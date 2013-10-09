@@ -16,7 +16,6 @@ non-FeinCMS managed views such as Django's administration tool.
 
 # ------------------------------------------------------------------------
 import logging
-from functools import wraps
 
 from django.conf import settings as django_settings
 from django.db import models
@@ -191,19 +190,10 @@ class Extension(extensions.Extension):
 
     def handle_modeladmin(self, modeladmin):
 
-        """
-        Extend default queryset to prefetch translations.
-        """
-        def wrap_queryset(f):
-            @wraps(f)
-            def wrapper(request, *args, **kwargs):
-                qs = f(request, *args, **kwargs)
-                qs = qs.prefetch_related('translation_of__translations',
-                                         'translations')
-                return qs
-            return wrapper
-
-        modeladmin.queryset = wrap_queryset(modeladmin.queryset)
+        extensions.prefetch_modeladmin_get_queryset(
+            modeladmin,
+            "translation_of__translations",
+            "translations")
 
         def available_translations_admin(self, page):
             translations = dict((p.language, p.id) for p in page.available_translations())
